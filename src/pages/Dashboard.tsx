@@ -10,7 +10,6 @@ const Dashboard = () => {
   const [mediaClips, setMediaClips] = useState<MediaClip[]>([]);
   const [merging, setMerging] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [blobUrls, setBlobUrls] = useState<string[]>([]);
 
   useEffect(() => {
     const fetchUserPosts = async () => {
@@ -34,7 +33,7 @@ const Dashboard = () => {
     fetchUserPosts();
   }, []);
 
-  const fetchAndStoreMediaClips = async (postId: string) => {
+  const fetchMediaClips = async (postId: string) => {
     try {
       const { data, error } = await supabase
         .from('media_clips')
@@ -43,52 +42,25 @@ const Dashboard = () => {
         .order('created_at', { ascending: true });
 
       if (error) throw error;
-
-      // Fetch files and store blob URLs
-      const tempBlobUrls: string[] = [];
-      for (const clip of data) {
-        const response = await fetch(clip.url);
-        const blob = await response.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        tempBlobUrls.push(blobUrl);
-        sessionStorage.setItem(clip.id, blobUrl); // Temporary storage
-      }
-
-      setBlobUrls(tempBlobUrls);
       setMediaClips(data || []);
       setSelectedPost(posts.find(p => p.id === postId) || null);
     } catch (error) {
-      console.error('Error fetching and storing media clips:', error);
+      console.error('Error fetching media clips:', error);
     }
-  };
-
-  const enableCrossOriginIsolation = () => {
-    if (!document.featurePolicy?.allowsFeature('cross-origin-isolation')) {
-      document.write(
-        `<script>document.domain='${window.location.hostname}';</script>`
-      );
-    }
-  };
-
-  const disableCrossOriginIsolation = () => {
-    sessionStorage.clear();
-    blobUrls.forEach(url => URL.revokeObjectURL(url));
-    setBlobUrls([]);
   };
 
   const mergeClips = async () => {
     if (!mediaClips.length) return;
     setMerging(true);
-    enableCrossOriginIsolation();
 
     try {
       const FFmpeg = await loadFFmpeg();
       const ffmpeg = FFmpeg.createFFmpeg({ log: true });
       await ffmpeg.load();
 
-      // Write fetched Blob URLs to FFmpeg
+      // Download all clips
       for (let i = 0; i < mediaClips.length; i++) {
-        const response = await fetch(blobUrls[i]);
+        const response = await fetch(mediaClips[i].url);
         const buffer = await response.arrayBuffer();
         ffmpeg.FS('writeFile', `clip${i}.webm`, new Uint8Array(buffer));
       }
@@ -99,15 +71,17 @@ const Dashboard = () => {
         .join('\n');
       ffmpeg.FS('writeFile', 'concat.txt', concatContent);
 
-      // Merge clips
+      // Merge clips and convert to MP4
       await ffmpeg.run(
         '-f', 'concat',
         '-safe', '0',
         '-i', 'concat.txt',
-        '-c:v', 'libx264',
-        '-c:a', 'aac',
-        '-b:a', '192k',
-        'output.mp4'
+        '-c:v', 'libx264', // Use H.264 codec for video
+        '-c:a', 'aac',     // Use AAC codec for audio
+        '-strict', 'experimental',
+        '-b:a', '192k',    // Audio bitrate
+        '-movflags', '+faststart', // Enable fast start for web playback
+        'output.mp4'       // Output as MP4
       );
 
       // Download merged file
@@ -124,9 +98,16 @@ const Dashboard = () => {
       console.error('Error merging clips:', error);
     } finally {
       setMerging(false);
-      disableCrossOriginIsolation();
     }
   };
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center min-h-[50vh]">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -139,7 +120,7 @@ const Dashboard = () => {
             {posts.map((post) => (
               <button
                 key={post.id}
-                onClick={() => fetchAndStoreMediaClips(post.id)}
+                onClick={() => fetchMediaClips(post.id)}
                 className={`w-full text-left p-3 rounded-lg ${
                   selectedPost?.id === post.id
                     ? 'bg-indigo-50 border-2 border-indigo-500'
@@ -182,18 +163,18 @@ const Dashboard = () => {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {mediaClips.map((clip, i) => (
+                {mediaClips.map((clip) => (
                   <div key={clip.id} className="bg-white rounded-lg shadow-md p-4">
                     {clip.type === 'video' ? (
                       <video
-                        src={blobUrls[i]}
+                        src={clip.url}
                         controls
                         className="w-full rounded"
                         preload="metadata"
                       />
                     ) : (
                       <audio
-                        src={blobUrls[i]}
+                        src={clip.url}
                         controls
                         className="w-full"
                         preload="metadata"
@@ -205,6 +186,12 @@ const Dashboard = () => {
                   </div>
                 ))}
               </div>
+
+              {mediaClips.length === 0 && (
+                <div className="text-center py-12 bg-white rounded-lg">
+                  <p className="text-gray-500">No media clips uploaded yet.</p>
+                </div>
+              )}
             </>
           ) : (
             <div className="text-center py-12 bg-white rounded-lg">
