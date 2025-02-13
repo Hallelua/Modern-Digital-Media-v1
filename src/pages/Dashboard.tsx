@@ -62,12 +62,12 @@ const Dashboard = () => {
       for (let i = 0; i < mediaClips.length; i++) {
         const response = await fetch(mediaClips[i].url);
         const buffer = await response.arrayBuffer();
-        ffmpeg.FS('writeFile', clip${i}.webm, new Uint8Array(buffer));
+        ffmpeg.FS('writeFile', `clip${i}.webm`, new Uint8Array(buffer));
       }
 
       // Create concat file
       const concatContent = mediaClips
-        .map((_, i) => file 'clip${i}.webm')
+        .map((_, i) => `file 'clip${i}.webm'`)
         .join('\n');
       ffmpeg.FS('writeFile', 'concat.txt', concatContent);
 
@@ -91,7 +91,7 @@ const Dashboard = () => {
       
       const a = document.createElement('a');
       a.href = url;
-      a.download = merged_${selectedPost?.id}.mp4;
+      a.download = `merged_${selectedPost?.id}.mp4`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (error) {
@@ -204,4 +204,4 @@ const Dashboard = () => {
   );
 };
 
-export default Dashboard; 
+export default Dashboard;
